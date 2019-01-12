@@ -1,4 +1,4 @@
-import machine
+#import machine
 try:
     import utime as time
 except:
@@ -7,39 +7,28 @@ except:
 import gc
 #from timezone import TZONE
 
-class PCF8563(object):
-    _CONTROL_1 = 0x00
-    _CONTROL_2 = 0x01
-    _SECONDS = 0x02
-    _MINUTES = 0x03
-    _HOURS = 0x04
-    _DAY = 0x06
-    _DATE = 0x05
-    _MONTH = 0x07
-    _YEAR = 0x08
-    _CLK_OUT = 0x0D
-    _ALARM_TIME = 0x09
-    _ALARM_MINUTES = 0x09
-    _ALARM_HOURS = 0x0A
-    _ALARM_DAY = 0x0B
-    _ALARM_WEEKDAY = 0x0B
+#Registers overview
+_SECONDS = 0x02
+_MINUTES = 0x03
+_HOURS = 0x04
+_DAY = 0x06
+_DATE = 0x05
+_MONTH = 0x07
+_YEAR = 0x08
 
     # Clock-out frequencies
-    CLK_OUT_FREQ_32_DOT_768KHZ = 0x80
-    CLK_OUT_FREQ_1_DOT_024KHZ = 0x81
-    CLK_OUT_FREQ_32_KHZ = 0x82
-    CLK_OUT_FREQ_1_HZ = 0x83
-    CLK_HIGH_IMPEDANCE = 0x0
-    
-    #from machine import I2C, Pin
-    #from i2c_pcf8563 import PCF8563
-    #i2c = I2C(scl=Pin(14), sda=Pin(12), freq=400000)
-    #rtc = PCF8563(i2c, 0x51)
+#    CLK_OUT_FREQ_32_DOT_768KHZ = 0x80
+#    CLK_OUT_FREQ_1_DOT_024KHZ = 0x81
+#    CLK_OUT_FREQ_32_KHZ = 0x82
+#    CLK_OUT_FREQ_1_HZ = 0x83
+#    CLK_HIGH_IMPEDANCE = 0x0
+
+class PCF8563(object):
     #def __init__(self, i2c, i2c_addr, zone=0, win=True, source_time='local'):
     def __init__(self, i2c, i2c_addr):
         self.i2c = i2c
         self.i2c_addr = i2c_addr
-        self.timebuf = bytearray(7)
+        self.timebuf = None
         #self.zone = zone
         #self.win = win
         #self.stime = source_time
@@ -54,60 +43,46 @@ class PCF8563(object):
 
     # Преобразование двоично-десятичного формата
     def _bcd2dec(self, bcd):
+        """Convert binary coded decimal (BCD) format to decimal"""
         return (((bcd & 0xf0) >> 4) * 10 + (bcd & 0x0f))
 
     # Преобразование в двоично-десятичный формат
     def _dec2bcd(self, dec):
+        """Convert decimal to binary coded decimal (BCD) format"""
         tens, units = divmod(dec, 10)
         return (tens << 4) + units
 
-    def _tobytes(self, num):
-        return num.to_bytes(1, 'little')
-
-    #Записьь нового значения в PCF8563
-    def _write(self, register, data):
-        #print("addr =0x%x register = 0x%x data = 0x%x %i " % (self._addr, register, data,_bcd_to_int(data)))
-        self.i2c.write_byte_data(self._addr, register, data)
-
-    #Чтение из PCF8563
-    def _read(self, data):
-        returndata = self.i2c.read_byte_data(self._addr, data)
-        #print("addr = 0x%x data = 0x%x %i returndata = 0x%x %i " % (self._addr, data, data, returndata, _bcd_to_int(returndata)))
-        return returndata
+    # Чтение из PCF8563
+    def read_time(self):
+        """Reading RTC time"""
+        self.timebuf = self.i2c.readfrom_mem(self.i2c_addr, _SECONDS, 7)
+        return self._convert()
         
-    def _read_seconds(self):
-        return _bcd_to_int(self._read(self._REG_SECONDS) & 0x7F)
+#    def _write(self):
+#        """Record the time value in the RTC clock"""
+#        self.i2c.writeto_mem(self.i2c_addr, DATETIME_REG, 7)
 
-    def _read_minutes(self):
-        return _bcd_to_int(self._read(self._REG_MINUTES) & 0x7F)
-
-    def _read_hours(self):
-        d = self._read(self._REG_HOURS) & 0x3F
-        return _bcd_to_int(d & 0x3F)
-
-    def _read_day(self):
-        return _bcd_to_int(self._read(self._REG_DAY) & 0x07)
-
-    def _read_date(self):
-        return _bcd_to_int(self._read(self._REG_DATE) & 0x3F)
-
-    def _read_month(self):
-        return _bcd_to_int(self._read(self._REG_MONTH) & 0x1F)
-
-    def _read_year(self):
-        return _bcd_to_int(self._read(self._REG_YEAR))
-
-    def read_all(self):
-        """Return a tuple such as (year, month, date, day, hours, minutes,
-        seconds).
-        """
-        return (self._read_year(), self._read_month(), self._read_date(),
-                self._read_day(), self._read_hours(), self._read_minutes(),
-                self._read_seconds())
-
-    def read_str(self):
-        """Return a string such as 'YY-DD-MMTHH-MM-SS'.
-        """
-        return '%02d-%02d-%02dT%02d:%02d:%02d' % (self._read_year(),
-                                                  self._read_month(), self._read_date(), self._read_hours(),
-                                                  self._read_minutes(), self._read_seconds())
+    # Преобразуем время RTC PCF8563 в формат ESP8266
+    # Возвращает кортеж в формате localtime() (в ESP8266 0 - понедельник, а 6 - воскресенье)
+    def _convert(self):
+        """Time convert to ESP8266"""
+        data = self.timebuf
+        ss = self._bcd2dec(data[0] & 0x7F)
+        mm = self._bcd2dec(data[1] & 0x7F)
+        hh = self._bcd2dec(data[2] & 0x3F)
+        dd = self._bcd2dec(data[3] & 0x3F)
+        wday = data[4] & 0x07
+        MM = self._bcd2dec(data[5] & 0x1F)
+        yy = self._bcd2dec(data[6]) + 2000
+        # Time from PCF8563 in time.localtime() format (less yday)
+        result = yy, MM, dd, hh, mm, ss, wday, 0 # wday in esp8266 0 == Monday, 6 == Sunday
+        return result
+        
+#    #(YY, MM, mday, hh, mm, ss, wday, yday) = (2000, 1, 1, 0, 0, 0, 0, 0)
+#   def save_time(self, dtime=(2000, 1, 1, 0, 0, 0, 0, 0)):
+#        """Direct write un-none value.
+#        Range: seconds [0,59], minutes [0,59], hours [0,23],
+#               day [0,7], date [1-31], month [1-12], year [0-99].
+#        """
+#        if dtime[5] < 0 or dtime[5] > 59:
+#            raise ValueError('Seconds is out of range [0,59].')
