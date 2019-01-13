@@ -11,17 +11,10 @@ import gc
 _SECONDS = 0x02
 _MINUTES = 0x03
 _HOURS = 0x04
-_DAY = 0x06
 _DATE = 0x05
+_WDAY = 0x06
 _MONTH = 0x07
 _YEAR = 0x08
-
-    # Clock-out frequencies
-#    CLK_OUT_FREQ_32_DOT_768KHZ = 0x80
-#    CLK_OUT_FREQ_1_DOT_024KHZ = 0x81
-#    CLK_OUT_FREQ_32_KHZ = 0x82
-#    CLK_OUT_FREQ_1_HZ = 0x83
-#    CLK_HIGH_IMPEDANCE = 0x0
 
 class PCF8563(object):
     #def __init__(self, i2c, i2c_addr, zone=0, win=True, source_time='local'):
@@ -40,33 +33,25 @@ class PCF8563(object):
             print('RTS PCF8563 not found at address: 0x%x ' %(self.i2c_addr))
         gc.collect() #Очищаем RAM
 
-
-    # Преобразование двоично-десятичного формата
+    #Преобразование двоично-десятичного формата
     def _bcd2dec(self, bcd):
         """Convert binary coded decimal (BCD) format to decimal"""
         return (((bcd & 0xf0) >> 4) * 10 + (bcd & 0x0f))
 
-    # Преобразование в двоично-десятичный формат
+    #Преобразование в двоично-десятичный формат
     def _dec2bcd(self, dec):
         """Convert decimal to binary coded decimal (BCD) format"""
         tens, units = divmod(dec, 10)
         return (tens << 4) + units
 
-    # Чтение из PCF8563
-    def read_time(self):
-        """Reading RTC time"""
-        self.timebuf = self.i2c.readfrom_mem(self.i2c_addr, _SECONDS, 7)
-        return self._convert()
-        
-#    def _write(self):
-#        """Record the time value in the RTC clock"""
-#        self.i2c.writeto_mem(self.i2c_addr, DATETIME_REG, 7)
+    def _tobytes(self, num):
+        return num.to_bytes(1, 'little')
 
-    # Преобразуем время RTC PCF8563 в формат ESP8266
-    # Возвращает кортеж в формате localtime() (в ESP8266 0 - понедельник, а 6 - воскресенье)
-    def _convert(self):
-        """Time convert to ESP8266"""
-        data = self.timebuf
+    #Чтение времени из PCF8563 и преобразование в формат ESP8266
+    #Возвращает кортеж в формате localtime() (в ESP8266 0 - понедельник, а 6 - воскресенье)
+    def read_time(self):
+        """Reading RTC time and convert to ESP8266"""
+        data = self.i2c.readfrom_mem(self.i2c_addr, _SECONDS, 7)
         ss = self._bcd2dec(data[0] & 0x7F)
         mm = self._bcd2dec(data[1] & 0x7F)
         hh = self._bcd2dec(data[2] & 0x3F)
@@ -74,15 +59,35 @@ class PCF8563(object):
         wday = data[4] & 0x07
         MM = self._bcd2dec(data[5] & 0x1F)
         yy = self._bcd2dec(data[6]) + 2000
-        # Time from PCF8563 in time.localtime() format (less yday)
-        result = yy, MM, dd, hh, mm, ss, wday, 0 # wday in esp8266 0 == Monday, 6 == Sunday
-        return result
-        
-#    #(YY, MM, mday, hh, mm, ss, wday, yday) = (2000, 1, 1, 0, 0, 0, 0, 0)
-#   def save_time(self, dtime=(2000, 1, 1, 0, 0, 0, 0, 0)):
-#        """Direct write un-none value.
-#        Range: seconds [0,59], minutes [0,59], hours [0,23],
-#               day [0,7], date [1-31], month [1-12], year [0-99].
-#        """
-#        if dtime[5] < 0 or dtime[5] > 59:
-#            raise ValueError('Seconds is out of range [0,59].')
+        return yy, MM, dd, hh, mm, ss, wday, 0 # in esp8266 0 == Monday, 6 == Sunday
+
+    #Сохраняем новое время в PCF8563
+    def save_time(self, dtime=(0, 1, 1, 0, 0, 0, 0, 0)):
+        """Direct write un-none value.
+        Range: seconds [0,59], minutes [0,59], hours [0,23],
+        day [0,7], date [1-31], month [1-12], year [0-99].
+        """
+        (yy, MM, mday, hh, mm, ss, wday, yday) = dtime
+        if ss < 0 or ss > 59:
+            raise ValueError('Seconds is out of range [0,59].')
+        self.i2c.writeto_mem(self.i2c_addr, _SECONDS, self._tobytes(self._dec2bcd(ss)))
+        if mm < 0 or mm > 59:
+            raise ValueError('Minutes is out of range [0,59].')
+        self.i2c.writeto_mem(self.i2c_addr, _MINUTES, self._tobytes(self._dec2bcd(mm)))
+        if hh < 0 or hh > 23:
+            raise ValueError('Hours is out of range [0,23].')
+        self.i2c.writeto_mem(self.i2c_addr, _HOURS, self._tobytes(self._dec2bcd(hh)))  #Sets to 24hr mode
+        if mday < 1 or mday > 31:
+            raise ValueError('Date is out of range [1,31].')
+        self.i2c.writeto_mem(self.i2c_addr, _DATE, self._tobytes(self._dec2bcd(mday)))  #Day of month
+        if wday < 0 or wday > 6:
+            raise ValueError('Day is out of range [0,6].')
+        self.i2c.writeto_mem(self.i2c_addr, _WDAY, self._tobytes(self._dec2bcd(wday)))
+        if MM < 1 or MM > 12:
+            raise ValueError('Month is out of range [1,12].')
+        self.i2c.writeto_mem(self.i2c_addr, _MONTH, self._tobytes(self._dec2bcd(MM)))
+        if yy < 0 or yy > 99:
+            raise ValueError('Years is out of range [0,99].')
+        self.i2c.writeto_mem(self.i2c_addr, _YEAR, self._tobytes(self._dec2bcd(yy)))
+        (yy, MM, mday, hh, mm, ss, wday, yday) = self.read_time()
+        print('New RTC Time: %02d-%02d-%02d %02d:%02d:%02d' %(yy, MM, mday, hh, mm, ss)) #Выводим новое время PCF8563
