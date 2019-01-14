@@ -1,38 +1,35 @@
-#import machine
+from micropython import const
 try:
     import utime as time
 except:
     import time
-#import uasyncio as asyncio
 import gc
-#from timezone import TZONE
+from timezone import TZONE
 
 #Registers overview
-_SECONDS = 0x02
-_MINUTES = 0x03
-_HOURS = 0x04
-_DATE = 0x05
-_WDAY = 0x06
-_MONTH = 0x07
-_YEAR = 0x08
+_SECONDS = const(0x02)
+_MINUTES = const(0x03)
+_HOURS = const(0x04)
+_DATE = const(0x05)
+_WDAY = const(0x06)
+_MONTH = const(0x07)
+_YEAR = const(0x08)
 
 class PCF8563(object):
-    #def __init__(self, i2c, i2c_addr, zone=0, dht=True, source_time='local'):
-    def __init__(self, i2c, i2c_addr):
+    def __init__(self, i2c, i2c_addr, zone=0, dht=True):
         self.i2c = i2c
         self.i2c_addr = i2c_addr
         self.timebuf = None
-        #self.zone = zone
-        #self.win = dht
-        #self.stime = source_time
-        #self.tzone = TZONE(self.zone)
-        #self.rtc = False # Изменяется на True только когда март или октябрь и только в последнее воскресенье месяца
+        self.zone = zone
+        self.block = False
+        self.dht = dht
+        self.tzone = TZONE(self.zone)
         if self.i2c_addr in self.i2c.scan():
-            print('RTS PCF8563 find at address: 0x%x ' %(self.i2c_addr))
+            print('RTC: PCF8563 find at address: 0x%x ' %(self.i2c_addr))
         else:
-            print('RTS PCF8563 not found at address: 0x%x ' %(self.i2c_addr))
+            print('RTC: PCF8563 not found at address: 0x%x ' %(self.i2c_addr))
         gc.collect() #Очищаем RAM
-
+        
     #Преобразование двоично-десятичного формата
     def _bcd2dec(self, bcd):
         """Convert binary coded decimal (BCD) format to decimal"""
@@ -66,32 +63,74 @@ class PCF8563(object):
             return yy, MM, dd, hh, mm, ss, wday, 0 # wday in esp8266 0 == Monday, 6 == Sunday
         elif datetime != None:
             """Direct write un-none value"""
-            if datetime == 'reset':
+            if datetime == 'reset': #Если datetime = 'reset', сброс времени на 2000-01-01 00:00:00
                 (yy, MM, mday, hh, mm, ss, wday, yday) = (0, 1, 1, 0, 0, 0, 0, 0)
             else:
                 (yy, MM, mday, hh, mm, ss, wday, yday) = datetime
-            if ss < 0 or ss > 59:
-                raise ValueError('Seconds is out of range [0,59].')
+            if ss < 0 or ss > 59: #Записывем новое значение секунд
+                raise ValueError('RTC: Seconds is out of range [0,59].')
             self.i2c.writeto_mem(self.i2c_addr, _SECONDS, self._tobytes(self._dec2bcd(ss)))
-            if mm < 0 or mm > 59:
-                raise ValueError('Minutes is out of range [0,59].')
+            if mm < 0 or mm > 59: #Записываем новое значение минут
+                raise ValueError('RTC: Minutes is out of range [0,59].')
             self.i2c.writeto_mem(self.i2c_addr, _MINUTES, self._tobytes(self._dec2bcd(mm)))
-            if hh < 0 or hh > 23:
-                raise ValueError('Hours is out of range [0,23].')
+            if hh < 0 or hh > 23: #Записываем новое значение часов
+                raise ValueError('RTC: Hours is out of range [0,23].')
             self.i2c.writeto_mem(self.i2c_addr, _HOURS, self._tobytes(self._dec2bcd(hh)))  #Sets to 24hr mode
-            if mday < 1 or mday > 31:
-                raise ValueError('Date is out of range [1,31].')
+            if mday < 1 or mday > 31: #Записываем новое значение дней
+                raise ValueError('RTC: Date is out of range [1,31].')
             self.i2c.writeto_mem(self.i2c_addr, _DATE, self._tobytes(self._dec2bcd(mday)))  #Day of month
-            if wday < 0 or wday > 6:
-                raise ValueError('Day is out of range [0,6].')
+            if wday < 0 or wday > 6: #Записываем новое значение дней недели
+                raise ValueError('RTC: Day is out of range [0,6].')
             self.i2c.writeto_mem(self.i2c_addr, _WDAY, self._tobytes(self._dec2bcd(wday)))
-            if MM < 1 or MM > 12:
-                raise ValueError('Month is out of range [1,12].')
+            if MM < 1 or MM > 12: #Записываем новое значение месяцев
+                raise ValueError('RTC: Month is out of range [1,12].')
             self.i2c.writeto_mem(self.i2c_addr, _MONTH, self._tobytes(self._dec2bcd(MM)))
-            if yy < 0 or yy > 99:
-                raise ValueError('Years is out of range [0,99].')
+            if yy < 0 or yy > 99: #Записываем новое значение лет
+                raise ValueError('RTC: Years is out of range [0,99].')
             self.i2c.writeto_mem(self.i2c_addr, _YEAR, self._tobytes(self._dec2bcd(yy)))
-            (yy, MM, mday, hh, mm, ss, wday, yday) = self.datetime()
-            print('New RTC Time: %02d-%02d-%02d %02d:%02d:%02d' %(yy, MM, mday, hh, mm, ss)) #Выводим новое время PCF8563
+            (yy, MM, mday, hh, mm, ss, wday, yday) = self.datetime() #Cчитываем записанное новое значение времени с PCF8563
+            print('RTC: New Time: %02d-%02d-%02d %02d:%02d:%02d' %(yy, MM, mday, hh, mm, ss)) #Выводим новое время PCF8563
 
-
+    def settime(self, source='dht'):
+        z = 0
+        utc = self.datetime()
+        if  source == 'esp': #Устанавливаем время с часов ESP8266
+            utc = time.localtime()
+        elif source == 'ntp': #Устанавливаем время c NTP сервера
+            utc = time.localtime(self.tzone.getntp()) #Время с NTP без учета летнего или зимнего времени
+            z = self.tzone.adj_tzone(utc) if self.dht else 0 #Корректируем время по временным зонам
+        elif source == 'dht' and not self.block: #Только первод времени в PCF8563, если нет блокировки
+            rtc = self.datetime()
+            # Если время 3часа утра и последнее воскресенье месяца
+            if rtc[3] == 3 and self.tzone.sunday(rtc[0], rtc[1]) == rtc[2] and rtc[4] <= 2:
+                # Если март
+                if rtc[1] == 3:
+                    z = 1 if self.dht else 0 #Переводим время вперед
+                #Если октябрь
+                elif rtc[1] == 10:
+                    z = -1 if self.dht else 0 #Переводим время назад
+                self.block = True #Устанавливаем блокировку на изменение времени
+        rtc = self.datetime() #Cчитываем значение времени с PCF8563
+        #Блокировка перевода времени. Если октябрь, блокировка на 1час 3минуты
+        if self.block and rtc[1] == 10:
+            if rtc[3] == 2: #Если 2 часа, блокировка не снимается
+                pass
+            elif rtc[3] == 3 and rtc[4] <= 2: #Если 3 часа и меньше 2 минут, бликировка не снимается
+                pass
+            else: #Во всех остальных случаях блокировка снимается
+                self.block = False
+        #Если март, бликировка включена для следующего вызова метода
+        elif self.block and rtc[1] == 3:
+            if rtc[3] == 3: #Блокировка действует пока не измениться rtc[3] = 3
+                pass
+            else: #Во всех остальных случаях блокировка снимается
+                self.block = False
+        else: #Во всех остальных случаях блокировка снимается
+            self.block = False
+        (yy, MM, mday, hh, mm, ss, wday, yday) =  utc[0:3] + (utc[3]+z,) + utc[4:7] + (utc[7],)
+        #Если существует разница во времени, применяем изменения
+        if rtc[3] != hh or rtc[4] != mm or rtc[5] != ss:
+            print('RTC: Old Time: %02d-%02d-%02d %02d:%02d:%02d' %(rtc[0], rtc[1], rtc[2], rtc[3], rtc[4], rtc[5]))
+            self.datetime((yy - 2000, MM, mday, hh, mm, ss, wday, yday))
+        else: #Если разница во времени не обнаружена, выводим время с PCF8563
+            print('RTC: No time change: %02d-%02d-%02d %02d:%02d:%02d' %(yy, MM, mday, hh, mm, ss))
