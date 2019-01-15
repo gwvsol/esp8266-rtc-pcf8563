@@ -89,7 +89,7 @@ class PCF8563(object):
                 raise ValueError('RTC: Years is out of range [0,99].')
             self.i2c.writeto_mem(self.i2c_addr, _YEAR, self._tobytes(self._dec2bcd(yy)))
             (yy, MM, mday, hh, mm, ss, wday, yday) = self.datetime() #Cчитываем записанное новое значение времени с PCF8563
-            print('RTC: New Time: %02d-%02d-%02d %02d:%02d:%02d' %(yy, MM, mday, hh, mm, ss)) #Выводим новое время PCF8563
+            print('RTC: New Time: {:0>2d}-{:0>2d}-{:0>2d} {:0>2d}:{:0>2d}:{:0>2d}'.format(yy, MM, mday, hh, mm, ss)) #Выводим новое время PCF8563
 
     def settime(self, source='dht'):
         z = 0
@@ -129,8 +129,14 @@ class PCF8563(object):
             self.block = False
         (yy, MM, mday, hh, mm, ss, wday, yday) =  utc[0:3] + (utc[3]+z,) + utc[4:7] + (utc[7],)
         #Если существует разница во времени, применяем изменения
-        if rtc[3] != hh or rtc[4] != mm or rtc[5] != ss:
-            print('RTC: Old Time: %02d-%02d-%02d %02d:%02d:%02d' %(rtc[0], rtc[1], rtc[2], rtc[3], rtc[4], rtc[5]))
+        if source == 'dht' and rtc[3] != hh:
+            print('RTC: Old Time: {:0>2d}-{:0>2d}-{:0>2d} {:0>2d}:{:0>2d}:{:0>2d}'\
+            .format(rtc[0], rtc[1], rtc[2], rtc[3], rtc[4], rtc[5]))
             self.datetime((yy - 2000, MM, mday, hh, mm, ss, wday, yday))
-        else: #Если разница во времени не обнаружена, выводим время с PCF8563
-            print('RTC: No time change: %02d-%02d-%02d %02d:%02d:%02d' %(yy, MM, mday, hh, mm, ss))
+        elif source == 'esp' or source == 'ntp' or rtc[3] != hh or rtc[4] != mm or rtc[5] != ss:
+            print('RTC: Old Time: {:0>2d}-{:0>2d}-{:0>2d} {:0>2d}:{:0>2d}:{:0>2d}'\
+            .format(rtc[0], rtc[1], rtc[2], rtc[3], rtc[4], rtc[5]))
+            self.datetime((yy - 2000, MM, mday, hh, mm, ss, wday, yday))
+        #else: #Если разница во времени не обнаружена, выводим время с PCF8563
+        #    print('RTC: No time change: {:0>2d}-{:0>2d}-{:0>2d} {:0>2d}:{:0>2d}:{:0>2d}'\
+        #    .format(yy, MM, mday, hh, mm, ss))
