@@ -1,8 +1,5 @@
 from micropython import const
-try:
-    import utime as time
-except:
-    import time
+import time
 import gc
 from timezone import TZONE
 
