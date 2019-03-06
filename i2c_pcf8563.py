@@ -1,6 +1,6 @@
 from micropython import const
-import time
-import gc
+from time import localtime, mktime
+from gc import collect
 from timezone import TZONE
 
 #Registers overview
@@ -25,7 +25,7 @@ class PCF8563(object):
             print('RTC: PCF8563 find at address: 0x%x ' %(self.i2c_addr))
         else:
             print('RTC: PCF8563 not found at address: 0x%x ' %(self.i2c_addr))
-        gc.collect() #Очищаем RAM
+        collect() #Очищаем RAM
         
     #Преобразование двоично-десятичного формата
     def _bcd2dec(self, bcd):
@@ -89,15 +89,15 @@ class PCF8563(object):
             print('RTC: New Time: {:0>2d}-{:0>2d}-{:0>2d} {:0>2d}:{:0>2d}:{:0>2d}'.format(yy, MM, mday, hh, mm, ss)) #Выводим новое время PCF8563
 
     def settime(self, source='dht'):
-        z = 0
         utc = self.datetime()
         if  source == 'esp': #Устанавливаем время с часов ESP8266
-            utc = time.localtime()
+            utc = localtime()
         elif source == 'ntp': #Устанавливаем время c NTP сервера
-            utc = time.localtime(self.tzone.getntp()) #Время с NTP без учета летнего или зимнего времени
-            z = self.tzone.adj_tzone(utc) if self.dht else 0 #Корректируем время по временным зонам
+            ntp = tzone.getntp() # Время с NTP без учета летнего или зимнего времени в секундах начиная с 2000г
+            z = tzone.adj_tzone(localtime(ntp)) if self.dht else 0 # Корректируем время по временным зонам
+            utc = localtime(ntp + (3600 * z))
         elif source == 'dht' and not self.block: #Только первод времени в PCF8563, если нет блокировки
-            rtc = self.datetime()
+            rtc = utc
             # Если время 3часа утра и последнее воскресенье месяца
             if rtc[3] == 3 and self.tzone.sunday(rtc[0], rtc[1]) == rtc[2] and rtc[4] <= 2:
                 # Если март
@@ -106,6 +106,7 @@ class PCF8563(object):
                 #Если октябрь
                 elif rtc[1] == 10:
                     z = -1 if self.dht else 0 #Переводим время назад
+                utc = localtime(mktime(rtc) + (3600 * z))
                 self.block = True #Устанавливаем блокировку на изменение времени
         rtc = self.datetime() #Cчитываем значение времени с PCF8563
         #Блокировка перевода времени. Если октябрь, блокировка на 1час 3минуты
@@ -124,7 +125,7 @@ class PCF8563(object):
                 self.block = False
         else: #Во всех остальных случаях блокировка снимается
             self.block = False
-        (yy, MM, mday, hh, mm, ss, wday, yday) =  utc[0:3] + (utc[3]+z,) + utc[4:7] + (utc[7],)
+        (yy, MM, mday, hh, mm, ss, wday, yday) =  utc
         #Если существует разница во времени, применяем изменения
         if source == 'dht' and rtc[3] != hh:
             print('RTC: Old Time: {:0>2d}-{:0>2d}-{:0>2d} {:0>2d}:{:0>2d}:{:0>2d}'\
