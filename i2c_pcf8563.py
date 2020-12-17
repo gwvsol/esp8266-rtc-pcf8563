@@ -93,8 +93,8 @@ class PCF8563(object):
         if  source == 'esp': #Устанавливаем время с часов ESP8266
             utc = localtime()
         elif source == 'ntp': #Устанавливаем время c NTP сервера
-            ntp = tzone.getntp() # Время с NTP без учета летнего или зимнего времени в секундах начиная с 2000г
-            z = tzone.adj_tzone(localtime(ntp)) if self.dht else 0 # Корректируем время по временным зонам
+            ntp = self.tzone.getntp() # Время с NTP без учета летнего или зимнего времени в секундах начиная с 2000г
+            z = self.tzone.adj_tzone(localtime(ntp)) if self.dht else 0 # Корректируем время по временным зонам
             utc = localtime(ntp + (3600 * z))
         elif source == 'dht' and not self.block: #Только первод времени в PCF8563, если нет блокировки
             rtc = utc
